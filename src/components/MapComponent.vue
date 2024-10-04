@@ -5,7 +5,7 @@
 </template>
 
 <script setup>
-import { onMounted } from "vue";
+import { onMounted, ref } from "vue";
 import "leaflet-draw/dist/leaflet.draw.css";
 import "leaflet/dist/leaflet.css";
 import L, { polyline } from "leaflet";
@@ -38,6 +38,10 @@ L.drawLocal.draw.handlers.polyline.tooltip.end =
 
 // marcador
 L.drawLocal.draw.handlers.marker.tooltip.start = "Clique no local desejado";
+
+// Controle do modo de desenho
+const isDrawingLine = ref(false);
+
 onMounted(() => {
   const map = L.map("map").setView([-8.063151, -34.871127], 13);
 
@@ -68,19 +72,53 @@ onMounted(() => {
   });
   map.addControl(drawControl);
 
+  // Quando o modo de desenho de linha é ativado
+  map.on(L.Draw.Event.DRAWSTART, function (e) {
+    if (e.layerType === "polyline") {
+      isDrawingLine.value = true;
+      console.log("Modo de linha ativado");
+    }
+  });
+
+  // Quando o modo de desenho é finalizado
+  map.on(L.Draw.Event.DRAWSTOP, function () {
+    isDrawingLine.value = false;
+    console.log("Modo de linha desativado");
+  });
+
+  const markers = [];
+  const marker1 = L.marker([-8.063151, -34.871127]).addTo(map);
+  const marker2 = L.marker([-8.063151, -34.881127]).addTo(map);
+  markers.push(marker1, marker2);
+
+  markers.forEach((marker) => {
+    marker.on("click", function () {
+      if (isDrawingLine.value) {
+        // Iniciar a linha a partir do marker clicado
+        const markerPosition = marker.getLatLng();
+        console.log(`Iniciando linha a partir do marcador: ${markerPosition}`);
+
+        // Aqui você pode adicionar lógica para começar a linha
+        // e fazer com que as coordenadas iniciais sejam as do marcador
+      } else {
+        // Outros modos podem ser definidos aqui
+        console.log("Outro evento para o marcador");
+      }
+    });
+  });
+
   // Criação de linha e marcador
+  // Evento para captura de criação de polilinha
   map.on(L.Draw.Event.CREATED, function (e) {
-    var type = e.layerType,
-      //  Não sei por que a IDE avisa de depreciado se foi retirado da documentação
-      layer = e.layer;
-    if (type === "polyline") {
-      console.log("Linha desenhada!");
-    }
-    if (type === "marker") {
-      console.log("Adicionado ponto");
-    }
+    const layer = e.layer;
     drawnItems.addLayer(layer);
-    map.addLayer(layer);
+
+    if (e.layerType === "polyline") {
+      console.log("Linha criada", e.layer.getLatLngs());
+    }
+    if (e.layerType === "marker") {
+      console.log("Ponto adicionado");
+    }
   });
 
   // edição:

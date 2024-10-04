@@ -68,3 +68,9 @@ function toggleLeftDrawer () {
   leftDrawerOpen.value = !leftDrawerOpen.value
 }
 </script>
+
+<style>
+.q-page{
+  background-color: black;
+}
+</style>
