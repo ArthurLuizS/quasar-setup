@@ -6,6 +6,8 @@
         style="height: 100%; width: 100%"
         v-model:zoom="zoom"
         v-model:center="center"
+        @ready="onMapReady"
+        @click="onMapClick"
       >
         <l-control-layers position="topright" />
         <l-control position="bottomleft">
@@ -31,33 +33,98 @@
         />
         <!-- <l-mini-map :options="options" :layer="layer"></l-mini-map> -->
         <!-- <l-marker-cluster-group> -->
-        <l-marker
-          v-for="marker in markers"
+        <!-- <l-marker
+          v-for="marker in pontos"
           :key="marker.hostId"
           :icon="getIcon(marker)"
           :lat-lng="filterLatLog(marker)"
           @click="showDetail(marker)"
         >
           <l-tooltip>{{ marker.name }}</l-tooltip>
-        </l-marker>
+        </l-marker> -->
 
-        <div v-if="showLines">
+        <!-- <div v-if="showLines">
           <l-polyline
             v-for="link in polyLines"
             :key="link.id"
             :lat-lngs="link.latLong"
             :color="link.color"
-          ></l-polyline>
-        </div>
+          >
+          </l-polyline>
+        </div> -->
         <!-- </l-marker-cluster-group> -->
       </l-map>
+      <q-dialog persistent v-model="showDetailModal">
+        <q-card
+          class="full-width full-height"
+          :style="!maxDialog ? 'max-height: 600px; max-width: 1000px' : ''"
+        >
+          Teste
+          <q-bar>
+            <q-btn
+              dense
+              flat
+              icon="close"
+              v-close-popup
+              @click="graphData = null"
+            >
+              <q-tooltip content-class="bg-white text-primary"
+                >Fechar</q-tooltip
+              >
+            </q-btn>
+          </q-bar>
+        </q-card>
+      </q-dialog>
+      <q-dialog persistent v-model="showDialog">
+        <q-card
+          class="full-width full-height"
+          :style="!maxDialog ? 'max-height: 600px; max-width: 1000px' : ''"
+        >
+          T
+          <q-bar>
+            <q-btn
+              dense
+              flat
+              icon="close"
+              v-close-popup
+              @click="graphData = null"
+            >
+              <q-tooltip content-class="bg-white text-primary"
+                >Fechar</q-tooltip
+              >
+            </q-btn>
+          </q-bar>
+        </q-card>
+      </q-dialog>
+
+      <!-- Dialog para associar Polyline a dois pontos -->
+      <q-dialog v-model="showDialog2">
+        <q-card>
+          <q-card-section>
+            <div>Selecione o ponto de origem e o ponto de destino:</div>
+            <q-select
+              v-model="selectedStartPoint"
+              :options="markerOptions"
+              label="Ponto de origem"
+            />
+            <q-select
+              v-model="selectedEndPoint"
+              :options="markerOptions"
+              label="Ponto de destino"
+            />
+          </q-card-section>
+          <q-card-actions>
+            <q-btn @click="associatePolylineToPoints">Confirmar</q-btn>
+          </q-card-actions>
+        </q-card>
+      </q-dialog>
     </div>
   </q-page>
 </template>
 
 <script setup>
-import { ref } from "vue";
-import L from "leaflet";
+import { ref, onMounted, computed } from "vue";
+import L, { icon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
   LMap,
@@ -68,20 +135,43 @@ import {
   LMarker,
   LPolyline,
 } from "@vue-leaflet/vue-leaflet";
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import "leaflet.markercluster/dist/MarkerCluster.Default.css";
+import "leaflet.markercluster";
+import "leaflet-draw/dist/leaflet.draw.css";
+import "leaflet-draw";
+
+import IconNormal from "src/assets/quasar-logo-vertical.svg";
+import IconNotClassified from "src/assets/quasar-logo-vertical.svg";
+import IconInformation from "src/assets/quasar-logo-vertical.svg";
+import IconWarning from "src/assets/quasar-logo-vertical.svg";
+import IconMajor from "src/assets/quasar-logo-vertical.svg";
+import IconCritical from "src/assets/quasar-logo-vertical.svg";
+import IconDisaster from "src/assets/quasar-logo-vertical.svg";
 
 const zoom = ref(4);
 const center = ref([-10, -50]);
-const markers = ref([
-  {
-    name: "Arthur 1",
-    hostId: "123",
-  },
-]);
+const markers = L.markerClusterGroup();
 const showLines = ref(true);
 const polyLines = ref([
   {
     id: "123",
-    latLong: [],
+    latLong: [
+      [
+        [-8.131432, -34.938023], // Recife
+        [-7.996206, -34.838986], // Olinda
+      ],
+    ],
+    color: "red",
+  },
+  {
+    id: "123",
+    latLong: [
+      [
+        [-8.181431, -34.938913], // Recife
+        [-7.998205, -35.838986], // Olinda
+      ],
+    ],
     color: "red",
   },
 ]);
@@ -117,6 +207,8 @@ const options = ref({
 const layer = ref(
   new L.TileLayer("http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png")
 );
+
+const showDialog = ref(false);
 
 const getIcon = (marker) => {
   if (marker.priority === 0) {
@@ -174,10 +266,177 @@ const showDetailModal = ref();
 const graphId = ref();
 const graphRange = ref();
 const showDetail = (marker) => {
+  console.log("abrir algo");
+  console.log(marker);
   tab.value = "detail";
   lastMarker.value = marker;
   showDetailModal.value = true;
   graphId.value = null;
   graphRange.value = 1;
 };
+
+const pontos = [
+  {
+    id: "1",
+    name: "Recife",
+    hostId: "123",
+    latitude: "-8.131432",
+    longitude: "-34.938023",
+  },
+  {
+    id: "2",
+    name: "Olinda",
+    hostId: "1234",
+    latitude: "-7.996206",
+    longitude: "-34.838986",
+  },
+  {
+    id: "3",
+    name: "Camaragibe",
+    hostId: "12345",
+    latitude: "-8.022041",
+    longitude: "-34.979277",
+  },
+];
+
+const map = ref();
+
+const loadingMarkers = () => {
+  // Adiciona os pontos como marcadores ao cluster
+  pontos.forEach((ponto) => {
+    const latLng = [parseFloat(ponto.latitude), parseFloat(ponto.longitude)];
+    const marker = L.marker(latLng, {
+      icon: getIcon(ponto),
+      ponto,
+    }).bindTooltip(ponto.name);
+    markers.addLayer(marker); // Adiciona cada marcador ao grupo
+  });
+  markers.on("click", function (a) {
+    showDetail(a.layer.options.ponto);
+    console.log(a.layer.options.ponto);
+  });
+
+  // Adiciona o cluster ao mapa quando o mapa estiver pronto
+  map.value.addLayer(markers);
+};
+
+const onMapReady = (leafletMap) => {
+  map.value = leafletMap; // Atribui a instância do mapa do Leaflet
+  loadingMarkers(); // Carrega os marcadores
+  map.value.addLayer(markers); // Adiciona o cluster ao mapa
+
+  const drawnItems = new L.FeatureGroup();
+  map.value.addLayer(drawnItems);
+
+  polyLines.value.forEach((polylineObj) => {
+    const polylineCoords = polylineObj.latLong;
+    const polyline = L.polyline(polylineCoords, {
+      color: polylineObj.color, // Usa a cor definida no objeto
+      weight: 4,
+    }).addTo(map.value);
+    drawnItems.addLayer(polyline); // Adiciona ao grupo de itens editáveis
+  });
+
+  const drawControl = new L.Control.Draw({
+    draw: {
+      polyline: {
+        shapeOptions: {
+          color: "#f357a1", // Cor da linha
+          weight: 5, // Espessura da linha
+        },
+      },
+      polygon: false, // Desabilita polígonos, por exemplo
+      circle: false,
+      rectangle: false,
+      marker: true,
+    },
+    edit: {
+      featureGroup: drawnItems, // Grupo de itens que podem ser editados
+      edit: {
+        selectedPathOptions: {
+          maintainColor: true, // Mantém a cor da linha durante a edição
+          opacity: 0.5,
+        },
+      },
+      remove: true, // Habilita remoção
+    },
+  });
+
+  map.value.addControl(drawControl);
+
+  // Listeners para detectar quando o modo de desenho começa e termina
+  map.value.on("draw:drawstart", (e) => {
+    console.log("Modo de desenho ativado");
+    isDrawingMode.value = true; // Ativa o modo de desenho
+  });
+
+  map.value.on("draw:drawstop", (e) => {
+    console.log("Modo de desenho desativado");
+    isDrawingMode.value = false; // Desativa o modo de desenho
+  });
+  // Evento ao finalizar o desenho
+  map.value.on(L.Draw.Event.CREATED, (event) => {
+    const layer = event.layer;
+    drawnItems.addLayer(layer); // Adiciona a linha desenhada ao grupo
+    console.log("Nova linha desenhada:", layer.getLatLngs()); // Exibe as coordenadas
+    // showDialog2.value = true; // Abre o dialog para associar aos pontos
+    // currentPolylineCoords.value = layer.getLatLngs();
+  });
+
+  // Evento ao editar uma linha
+  map.value.on(L.Draw.Event.EDITED, (event) => {
+    const layers = event.layers;
+    layers.eachLayer((layer) => {
+      console.log("Linha editada:", layer.getLatLngs()); // Exibe as coordenadas da linha editada
+    });
+  });
+};
+
+const clickedLatLng = ref();
+const isDrawingMode = ref(false);
+const onMapClick = (e) => {
+  // Captura a latitude e longitude do clique no mapa
+  if (!isDrawingMode.value) {
+    clickedLatLng.value = e.latlng;
+    console.log(clickedLatLng.value);
+
+    // Abre o dialog
+    showDialog.value = true;
+  }
+};
+
+const toggleDrawingMode = () => {
+  isDrawingMode.value = !isDrawingMode.value;
+};
+
+// const showDialog2 = ref(false);
+// const currentPolylineCoords = ref([]);
+// const selectedStartPoint = ref(null);
+// const selectedEndPoint = ref(null);
+// // Opções para o select de pontos no dialog
+// const markerOptions = computed(() =>
+//   pontos.map((marker) => ({ label: marker.name, value: marker.id }))
+// );
+
+// // Associa a polyline aos pontos selecionados no dialog
+// const associatePolylineToPoints = () => {
+//   const startPoint = pontos.find(
+//     (marker) => marker.id === selectedStartPoint.value
+//   );
+//   const endPoint = pontos.find(
+//     (marker) => marker.id === selectedEndPoint.value
+//   );
+
+//   if (startPoint && endPoint) {
+//     console.log("Polyline associada a:", startPoint.name, "e", endPoint.name);
+//     polyLines.value.push({
+//       id: Date.now(),
+//       latLong: currentPolylineCoords.value,
+//       startPoint: startPoint,
+//       endPoint: endPoint,
+//       color: "blue",
+//     });
+//   }
+//   showDialog.value = false;
+// };
 </script>
