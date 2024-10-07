@@ -97,13 +97,43 @@
           <q-btn @click="criarMarker" label="novo ponto" />
         </q-card>
       </q-dialog>
+
+      <!-- vinculo da linha  -->
+      <q-dialog v-model="dialogVisible" persistent>
+        <q-card>
+          <q-card-section>
+            <div class="text-h6">Selecionar Marcadores</div>
+            <div>
+              <q-select
+                v-model="selectedStartMarker"
+                :options="formattedMarkers"
+                label="Ponto A (Início)"
+                emit-value
+                map-options
+                filled
+              />
+              <q-select
+                v-model="selectedEndMarker"
+                :options="formattedMarkers"
+                label="Ponto B (Fim)"
+                emit-value
+                map-options
+              />
+            </div>
+          </q-card-section>
+          <q-card-actions>
+            <q-btn @click="confirmSelection" label="Confirmar" />
+            <q-btn @click="dialogVisible = false" label="Cancelar" flat />
+          </q-card-actions>
+        </q-card>
+      </q-dialog>
     </div>
   </q-page>
 </template>
 
 <script setup>
 import { ref, onMounted, computed } from "vue";
-import L, { icon } from "leaflet";
+import L, { circleMarker, icon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
   LMap,
@@ -128,7 +158,7 @@ import IconMajor from "src/assets/quasar-logo-vertical.svg";
 import IconCritical from "src/assets/quasar-logo-vertical.svg";
 import IconDisaster from "src/assets/quasar-logo-vertical.svg";
 
-const zoom = ref(4);
+const zoom = ref(6);
 const center = ref([-10, -50]);
 const markers = L.markerClusterGroup();
 const showLines = ref(true);
@@ -139,6 +169,19 @@ const polyLines = ref([
       [
         [-8.131432, -34.938023], // Recife
         [-7.996206, -34.838986], // Olinda
+      ],
+    ],
+    color: "red",
+  },
+  {
+    id: "123",
+    latLong: [
+      [
+        [-8.131432, -34.938023],
+        [-6.404897301121007, -51.41776037156723],
+        [-8.997355569246363, -49.79230232812736],
+        [-6.055205938792393, -48.95760765717175],
+        [-7.996206, -34.838986],
       ],
     ],
     color: "red",
@@ -312,7 +355,8 @@ const onMapReady = (leafletMap) => {
       polygon: false, // Desabilita polígonos, por exemplo
       circle: false,
       rectangle: false,
-      marker: true,
+      circleMarker: false,
+      marker: false,
     },
     edit: {
       featureGroup: drawnItems, // Grupo de itens que podem ser editados
@@ -333,6 +377,17 @@ const onMapReady = (leafletMap) => {
     const layer = event.layer;
     drawnItems.addLayer(layer); // Adiciona a linha desenhada ao grupo
     console.log("Nova linha desenhada:", layer.getLatLngs()); // Exibe as coordenadas
+    console.log(layer);
+    const line = layer.getLatLngs();
+    const coordenadasFormatadas = line.map((latLng) => {
+      // Usa a função toArray() para garantir que obtemos um array simples
+      if (latLng instanceof L.LatLng) {
+        return [latLng.lat, latLng.lng]; // Para o objeto LatLng padrão
+      } else if (Array.isArray(latLng)) {
+        return [parseFloat(latLng[0]), parseFloat(latLng[1])]; // Para o caso de proxy array
+      }
+    });
+    onPolylineDrawn(coordenadasFormatadas);
   });
 
   // Evento ao editar uma linha
@@ -354,6 +409,17 @@ const onMapReady = (leafletMap) => {
     toggleDrawingMode();
     const type = event.layerType; // Tipo de desenho desativado
     console.log(`Modo de desenho desativado para: ${type}`);
+  });
+  // Evento para detectar o início do modo de exclusão
+  map.value.on("draw:deletestart", () => {
+    toggleDrawingMode();
+    console.log("Modo de exclusão ativado");
+  });
+
+  // Evento para detectar o término do modo de exclusão
+  map.value.on("draw:deletestop", () => {
+    toggleDrawingMode();
+    console.log("Modo de exclusão desativado");
   });
 };
 
@@ -384,9 +450,60 @@ const criarMarker = () => {
       longitude: latLng.lng,
     };
     pontos.push(newMarker);
-    setTimeout(() => {
-      loadingMarkers(); // Recarrega os marcadores
-    }, 5000);
+    // TODO: melhor reload o mapa
+    loadingMarkers(); // Recarrega os marcadores
+  }
+};
+
+const dialogVisible = ref(false);
+const selectedStartMarker = ref(null);
+const selectedEndMarker = ref(null);
+const newLine = ref(null);
+
+// Formata os pontos para o q-select
+const formattedMarkers = ref(
+  pontos.map((ponto) => ({
+    label: ponto.name, // Propriedade que será exibida
+    value: ponto, // O objeto completo do ponto
+  }))
+);
+
+const onPolylineDrawn = (latLgtLinha) => {
+  newLine.value = latLgtLinha;
+  dialogVisible.value = true; // Exibe o diálogo ao desenhar a polyline
+};
+
+const confirmSelection = () => {
+  if (selectedStartMarker.value && selectedEndMarker.value) {
+    const startCoords = [
+      selectedStartMarker.value.latitude,
+      selectedStartMarker.value.longitude,
+    ];
+    const endCoords = [
+      selectedEndMarker.value.latitude,
+      selectedEndMarker.value.longitude,
+    ];
+    // TODO: funcao de cadastro no bd
+    polyLines.value.push({
+      id: Date.now(),
+      latLong: [startCoords, ...newLine.value, endCoords], // Concatena corretamente
+      color: "blue",
+      pontoA: selectedStartMarker.value,
+      pontoB: selectedEndMarker.value,
+    });
+
+    // // Aqui você pode criar a polyline com os pontos selecionados
+    // const polyline = L.polyline([startCoords, endCoords], {
+    //   color: "blue",
+    //   weight: 4,
+    // }).addTo(map.value);
+
+    // Limpa a seleção e fecha o diálogo
+    selectedStartMarker.value = null;
+    selectedEndMarker.value = null;
+    dialogVisible.value = false;
+    newLine.value = null;
+    console.log(polyLines.value);
   }
 };
 </script>
