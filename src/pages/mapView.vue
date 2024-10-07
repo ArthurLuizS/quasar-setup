@@ -80,7 +80,7 @@
           class="full-width full-height"
           :style="!maxDialog ? 'max-height: 600px; max-width: 1000px' : ''"
         >
-          T
+          Criar um marker no mapa
           <q-bar>
             <q-btn
               dense
@@ -94,28 +94,7 @@
               >
             </q-btn>
           </q-bar>
-        </q-card>
-      </q-dialog>
-
-      <!-- Dialog para associar Polyline a dois pontos -->
-      <q-dialog v-model="showDialog2">
-        <q-card>
-          <q-card-section>
-            <div>Selecione o ponto de origem e o ponto de destino:</div>
-            <q-select
-              v-model="selectedStartPoint"
-              :options="markerOptions"
-              label="Ponto de origem"
-            />
-            <q-select
-              v-model="selectedEndPoint"
-              :options="markerOptions"
-              label="Ponto de destino"
-            />
-          </q-card-section>
-          <q-card-actions>
-            <q-btn @click="associatePolylineToPoints">Confirmar</q-btn>
-          </q-card-actions>
+          <q-btn @click="criarMarker" label="novo ponto" />
         </q-card>
       </q-dialog>
     </div>
@@ -164,16 +143,6 @@ const polyLines = ref([
     ],
     color: "red",
   },
-  {
-    id: "123",
-    latLong: [
-      [
-        [-8.181431, -34.938913], // Recife
-        [-7.998205, -35.838986], // Olinda
-      ],
-    ],
-    color: "red",
-  },
 ]);
 const tileProviders = ref([
   {
@@ -198,11 +167,6 @@ const tileProviders = ref([
       '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
   },
 ]);
-const options = ref({
-  position: "bottomright",
-  width: 200,
-  height: 175,
-});
 
 const layer = ref(
   new L.TileLayer("http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png")
@@ -302,6 +266,7 @@ const pontos = [
 const map = ref();
 
 const loadingMarkers = () => {
+  markers.clearLayers();
   // Adiciona os pontos como marcadores ao cluster
   pontos.forEach((ponto) => {
     const latLng = [parseFloat(ponto.latitude), parseFloat(ponto.longitude)];
@@ -315,7 +280,6 @@ const loadingMarkers = () => {
     showDetail(a.layer.options.ponto);
     console.log(a.layer.options.ponto);
   });
-
   // Adiciona o cluster ao mapa quando o mapa estiver pronto
   map.value.addLayer(markers);
 };
@@ -364,23 +328,11 @@ const onMapReady = (leafletMap) => {
 
   map.value.addControl(drawControl);
 
-  // Listeners para detectar quando o modo de desenho começa e termina
-  map.value.on("draw:drawstart", (e) => {
-    console.log("Modo de desenho ativado");
-    isDrawingMode.value = true; // Ativa o modo de desenho
-  });
-
-  map.value.on("draw:drawstop", (e) => {
-    console.log("Modo de desenho desativado");
-    isDrawingMode.value = false; // Desativa o modo de desenho
-  });
   // Evento ao finalizar o desenho
   map.value.on(L.Draw.Event.CREATED, (event) => {
     const layer = event.layer;
     drawnItems.addLayer(layer); // Adiciona a linha desenhada ao grupo
     console.log("Nova linha desenhada:", layer.getLatLngs()); // Exibe as coordenadas
-    // showDialog2.value = true; // Abre o dialog para associar aos pontos
-    // currentPolylineCoords.value = layer.getLatLngs();
   });
 
   // Evento ao editar uma linha
@@ -389,6 +341,19 @@ const onMapReady = (leafletMap) => {
     layers.eachLayer((layer) => {
       console.log("Linha editada:", layer.getLatLngs()); // Exibe as coordenadas da linha editada
     });
+  });
+
+  map.value.on("draw:drawstart", (event) => {
+    toggleDrawingMode();
+    const type = event.layerType; // Tipo de desenho ativado
+    console.log(`Modo de desenho ativado para: ${type}`);
+  });
+
+  // Evento para detectar o término do modo de desenho
+  map.value.on("draw:drawstop", (event) => {
+    toggleDrawingMode();
+    const type = event.layerType; // Tipo de desenho desativado
+    console.log(`Modo de desenho desativado para: ${type}`);
   });
 };
 
@@ -409,34 +374,19 @@ const toggleDrawingMode = () => {
   isDrawingMode.value = !isDrawingMode.value;
 };
 
-// const showDialog2 = ref(false);
-// const currentPolylineCoords = ref([]);
-// const selectedStartPoint = ref(null);
-// const selectedEndPoint = ref(null);
-// // Opções para o select de pontos no dialog
-// const markerOptions = computed(() =>
-//   pontos.map((marker) => ({ label: marker.name, value: marker.id }))
-// );
-
-// // Associa a polyline aos pontos selecionados no dialog
-// const associatePolylineToPoints = () => {
-//   const startPoint = pontos.find(
-//     (marker) => marker.id === selectedStartPoint.value
-//   );
-//   const endPoint = pontos.find(
-//     (marker) => marker.id === selectedEndPoint.value
-//   );
-
-//   if (startPoint && endPoint) {
-//     console.log("Polyline associada a:", startPoint.name, "e", endPoint.name);
-//     polyLines.value.push({
-//       id: Date.now(),
-//       latLong: currentPolylineCoords.value,
-//       startPoint: startPoint,
-//       endPoint: endPoint,
-//       color: "blue",
-//     });
-//   }
-//   showDialog.value = false;
-// };
+const criarMarker = () => {
+  if (!isDrawingMode.value && clickedLatLng.value) {
+    const latLng = clickedLatLng.value;
+    const newMarker = {
+      id: Date.now(),
+      name: `Ponto ${pontos.length + 1}`,
+      latitude: latLng.lat,
+      longitude: latLng.lng,
+    };
+    pontos.push(newMarker);
+    setTimeout(() => {
+      loadingMarkers(); // Recarrega os marcadores
+    }, 5000);
+  }
+};
 </script>
