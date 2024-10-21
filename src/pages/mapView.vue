@@ -1,5 +1,11 @@
 <template>
   <q-page>
+    <q-select
+      :options="typeline"
+      @update:model-value="changeTypeLine"
+      v-model="line"
+      map-options
+    ></q-select>
     <div style="height: calc(100vh - 50px); width: 100%">
       <l-map
         ref="map"
@@ -164,7 +170,7 @@ const markers = L.markerClusterGroup();
 const showLines = ref(true);
 const polyLines = ref([
   {
-    id: "123",
+    id: "1",
     latLong: [
       [-8.131432, -34.938023], // Recife
       [-7.996206, -34.838986], // Olinda
@@ -172,7 +178,7 @@ const polyLines = ref([
     color: "red",
   },
   {
-    id: "123",
+    id: "2",
     latLong: [
       [-8.131432, -34.938023],
       [-6.404897301121007, -51.41776037156723],
@@ -184,6 +190,32 @@ const polyLines = ref([
     color: "red",
   },
 ]);
+const polylineLayers = ref([]);
+const line = ref();
+const typeline = ref([
+  {
+    type: "Dashed",
+    label: "Dashed",
+    value: "10, 10",
+  },
+  {
+    type: "Dot",
+    label: "Dot",
+    value: "1, 10",
+  },
+  {
+    type: "Line",
+    label: "Line",
+    value: null,
+  },
+  {
+    type: "Bold",
+    label: "Bold",
+    value: null,
+    peso: 10,
+  },
+]);
+
 const tileProviders = ref([
   {
     name: "Claro",
@@ -339,6 +371,11 @@ const onMapReady = (leafletMap) => {
       weight: 4,
     }).addTo(map.value);
     drawnItems.addLayer(polyline); // Adiciona ao grupo de itens editáveis
+    polylineLayers.value.push({
+      id: polylineObj.id,
+      polylineInstance: polyline,
+    });
+    console.log(polylineLayers.value);
   });
 
   const drawControl = new L.Control.Draw({
@@ -501,6 +538,34 @@ const confirmSelection = () => {
     dialogVisible.value = false;
     newLine.value = null;
     console.log(polyLines.value);
+  }
+};
+
+// mudar experssura da linha e cor
+const changeTypeLine = (type) => {
+  console.log(type);
+  let tipo = null;
+  if (type.value) {
+    tipo = type.value;
+  }
+  let peso = 4;
+  if (type.peso) {
+    peso = type?.peso;
+  }
+  changePolylineStyle(1, "green", tipo, peso);
+};
+
+const changePolylineStyle = (id, newColor, dashArray, newWeight) => {
+  const polylineToChange = polylineLayers.value.find(
+    (layer) => layer.id === id
+  );
+
+  if (polylineToChange) {
+    polylineToChange.polylineInstance.setStyle({
+      color: newColor,
+      dashArray: dashArray, // Define o estilo da linha: tracejado, pontilhado
+      weight: newWeight, // Define a espessura da linha
+    });
   }
 };
 </script>
