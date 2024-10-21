@@ -1,0 +1,1047 @@
+<template>
+  <div style="height: calc(100vh - 50px); width: 100%">
+    <!-- ref="map" -->
+    <l-map
+      style="height: 100%; width: 100%"
+      v-model:zoom="zoom"
+      v-model:center="center"
+      @ready="MapReady"
+      @baselayerchange="onBaseLayerChange"
+      @click="onMapClick"
+    >
+      <l-control-layers position="topright" />
+      <l-control position="bottomleft">
+        <q-card>
+          <q-card-section class="q-py-none">
+            <!-- FIXME: após migração não funciona mais por ter sido removido o <L-Polyline/>  -->
+            <q-checkbox left-label v-model="showLines" label="Linhas" />
+            <q-checkbox left-label v-model="editMode" label="Editar Mapa" />
+          </q-card-section>
+        </q-card>
+      </l-control>
+      <l-tile-layer
+        ref="layer"
+        v-for="tileProvider in tileProviders"
+        :key="tileProvider.name"
+        :name="tileProvider.name"
+        :visible="tileProvider.visible"
+        :url="tileProvider.url"
+        :attribution="tileProvider.attribution"
+        layer-type="base"
+      />
+      <!-- <l-mini-map :options="options" :layer="layer"></l-mini-map> -->
+      <!-- <l-marker-cluster-group>
+        <l-marker
+          v-for="marker in markers"
+          :key="marker.hostId"
+          :icon="getIcon(marker)"
+          :lat-lng="filterLatLog(marker)"
+          @click="showDetail(marker)"
+        >
+          <l-tooltip>{{ marker.name }}</l-tooltip>
+        </l-marker>
+
+        <div v-if="showLines">
+          <l-polyline
+            v-for="link in polyLines"
+            :key="link.id"
+            :lat-lngs="link.latLong"
+            :color="link.color"
+          ></l-polyline>
+        </div>
+      </l-marker-cluster-group> -->
+      <!-- <l-polyline
+        :lat-lngs="fakeLine"
+        color="green"
+        v-if="showLines"
+        weight="2"
+      /> -->
+    </l-map>
+    <q-dialog persistent v-model="showDetailModal" :maximized="maxDialog">
+      <q-card
+        class="full-width full-height"
+        :style="!maxDialog ? 'max-height: 600px; max-width: 1000px' : ''"
+      >
+        <q-bar>
+          <div class="text-h4 text-bold">
+            {{ lastMarker ? lastMarker.name : null }}
+          </div>
+          <q-space />
+          <q-btn
+            dense
+            flat
+            :icon="maxDialog ? 'minimize' : 'crop_square'"
+            @click="
+              maxDialog = !maxDialog;
+              graphData = null;
+            "
+          >
+            <q-tooltip content-class="bg-white text-primary">{{
+              maxDialog ? "Minimizar" : "Maximizar"
+            }}</q-tooltip>
+          </q-btn>
+          <q-btn
+            dense
+            flat
+            icon="close"
+            v-close-popup
+            @click="
+              maxDialog = false;
+              graphData = null;
+            "
+          >
+            <q-tooltip content-class="bg-white text-primary">Fechar</q-tooltip>
+          </q-btn>
+        </q-bar>
+        <q-card-section style="height: calc(100% - 32px)">
+          <div class="row full-height">
+            <div class="col-auto">
+              <q-tabs
+                v-model="tab"
+                vertical
+                @input="onTabChange"
+                active-color="secondary"
+              >
+                <q-tab name="detail" icon="description" label="Detalhes" />
+                <q-tab name="alert" icon="report" label="Alertas" />
+                <q-tab name="graph" icon="analytics" label="Gráficos" />
+                <q-tab name="link" icon="share" label="Links" />
+              </q-tabs>
+            </div>
+            <div class="col" style="width: 140px">
+              <q-tab-panels
+                class="full-height"
+                v-model="tab"
+                animated
+                swipeable
+                vertical
+                transition-prev="jump-up"
+                transition-next="jump-up"
+              >
+                <q-tab-panel name="detail">
+                  <div class="text-h5 q-mb-md">Informações de Inventário</div>
+                  <div>
+                    Latitude:
+                    {{ lastMarker ? filterLatLog(lastMarker)[0] : null }}
+                  </div>
+                  <div>
+                    Longitude:
+                    {{ lastMarker ? filterLatLog(lastMarker)[1] : null }}
+                  </div>
+                </q-tab-panel>
+
+                <q-tab-panel name="alert">
+                  <q-table
+                    flat
+                    :data="alertList"
+                    :columns="alertColumns"
+                    :loading="alertLoading"
+                  >
+                    <template v-slot:body-cell-severity="props">
+                      <q-td :props="props">
+                        <q-chip
+                          v-if="props.row.severity == 0"
+                          text-color="white"
+                          style="background-color: #97aab3"
+                          >Not Classified</q-chip
+                        >
+                        <q-chip
+                          v-if="props.row.severity == 1"
+                          text-color="white"
+                          style="background-color: #7499ff"
+                          >Information</q-chip
+                        >
+                        <q-chip
+                          v-if="props.row.severity == 2"
+                          text-color="white"
+                          style="background-color: #ffc859"
+                          >Warning</q-chip
+                        >
+                        <q-chip
+                          v-if="props.row.severity == 3"
+                          text-color="white"
+                          style="background-color: #ffa059"
+                          >Average</q-chip
+                        >
+                        <q-chip
+                          v-if="props.row.severity == 4"
+                          text-color="white"
+                          style="background-color: #e97659"
+                          >High</q-chip
+                        >
+                        <q-chip
+                          v-if="props.row.severity == 5"
+                          text-color="white"
+                          style="background-color: #e45959"
+                          >Disaster</q-chip
+                        >
+                      </q-td>
+                    </template>
+                  </q-table>
+                </q-tab-panel>
+
+                <q-tab-panel name="graph" class="full-height">
+                  <div>
+                    <q-btn-group outline spread>
+                      <q-btn
+                        @click="refreshGraph(1)"
+                        outline
+                        :color="graphRange === 1 ? 'primary' : 'secondary'"
+                        label="1 DIA"
+                      />
+                      <q-btn
+                        @click="refreshGraph(3)"
+                        outline
+                        :color="graphRange === 3 ? 'primary' : 'secondary'"
+                        label="3 DIAS"
+                      />
+                      <q-btn
+                        @click="refreshGraph(7)"
+                        outline
+                        :color="graphRange === 7 ? 'primary' : 'secondary'"
+                        label="7 DIAS"
+                      />
+                      <q-btn
+                        @click="refreshGraph(15)"
+                        outline
+                        :color="graphRange === 15 ? 'primary' : 'secondary'"
+                        label="15 DIAS"
+                      />
+                      <q-btn
+                        @click="refreshGraph(30)"
+                        outline
+                        :color="graphRange === 30 ? 'primary' : 'secondary'"
+                        label="30 DIAS"
+                      />
+                    </q-btn-group>
+                    <q-select
+                      class="q-mt-sm"
+                      dense
+                      outlined
+                      use-input
+                      hide-selected
+                      fill-input
+                      @input="loadGraph"
+                      v-model="graphId"
+                      :options="hostGraphOptions"
+                      option-label="name"
+                      option-value="id"
+                      emit-value
+                      map-options
+                      @filter="hostGraphFilter"
+                    >
+                      <template v-slot:no-option>
+                        <q-item>
+                          <q-item-section class="text-grey">
+                            Sem resultados
+                          </q-item-section>
+                        </q-item>
+                      </template>
+                    </q-select>
+                  </div>
+                  <div style="height: calc(100% - 90px)">
+                    <q-resize-observer @resize="updateGraph" />
+                    <v-chart
+                      ref="echart"
+                      style="min-height: 300px"
+                      class="full-width"
+                      :option="getChartOptions"
+                    >
+                      <q-inner-loading :showing="graphLoading">
+                        <q-spinner size="70px" color="white" />
+                      </q-inner-loading>
+                    </v-chart>
+                  </div>
+                </q-tab-panel>
+
+                <q-tab-panel name="link"
+                  >Teste
+                  <q-list bordered separator>
+                    <q-item
+                      clickable
+                      v-ripple
+                      v-for="link in linksByHost()"
+                      :key="link.id"
+                      @click="deleteLinkClick(link)"
+                    >
+                      <q-item-section avatar>
+                        <q-icon color="negative" name="delete" />
+                      </q-item-section>
+                      <q-item-section class="row">
+                        {{ nameByHost(link.host_a)[0].name }} --
+                        {{ nameByHost(link.host_b)[0].name }}
+                      </q-item-section>
+                    </q-item>
+                    <q-item v-if="linksByHost().length === 0">
+                      <q-item-section> Nenhum link encontrado </q-item-section>
+                    </q-item>
+                  </q-list>
+                  <q-card
+                    flat
+                    bordered
+                    class="bg-grey-1 q-mt-md"
+                    v-if="auth.isAuthenticated"
+                  >
+                    <q-card-section>
+                      <div class="row">
+                        <q-select
+                          outlined
+                          class="col q-mr-sm"
+                          dense
+                          label="Adicionar Link"
+                          v-model="selectedNewLink"
+                          :options="markFilter"
+                          option-value="id"
+                          option-label="name"
+                        />
+                        <q-btn
+                          label="Adicionar"
+                          color="primary"
+                          @click="addLink"
+                        />
+                      </div>
+                    </q-card-section>
+                  </q-card>
+                </q-tab-panel>
+              </q-tab-panels>
+            </div>
+          </div>
+        </q-card-section>
+      </q-card>
+    </q-dialog>
+    <q-dialog v-model="showLinkDeleteModal" persistent>
+      <q-card>
+        <q-card-section class="row items-center">
+          <span class="q-mt-md q-ml-sm"
+            >Deseja realmente remover o link entre
+            <span class="text-bold">{{
+              lastLink ? nameByHost(lastLink.host_a)[0].name : null
+            }}</span>
+            e
+            <span class="text-bold">{{
+              lastLink ? nameByHost(lastLink.host_b)[0].name : null
+            }}</span
+            >?</span
+          >
+        </q-card-section>
+
+        <q-card-actions align="right">
+          <q-btn flat label="Desistir" color="primary" v-close-popup />
+          <q-btn flat label="Remover" color="negative" @click="deleteLink" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+    <q-dialog v-model="showRelationLine" persistent>
+      <q-card>
+        <q-card-section class="row items-center">
+          <span> Relacionar linha aos Hosts </span>
+          <div>
+            <q-select v-model="pointerA" :options="fakeMarkers" map-options />
+            <q-select v-model="pointerB" :options="fakeMarkers" map-options />
+          </div>
+        </q-card-section>
+
+        <q-card-actions align="right">
+          <q-btn flat label="Desistir" color="primary" v-close-popup />
+          <q-btn
+            flat
+            label="Relacionar"
+            color="primary"
+            @click="relationLine"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+  </div>
+</template>
+
+<script setup>
+  import { ref, onMounted, computed, provide, watch } from "vue";
+  import { useRoute } from "vue-router";
+  import { date } from "quasar";
+  import { api } from "boot/axios";
+  import { useAuth } from "stores/auth";
+
+  import L, { circleMarker, icon } from "leaflet";
+  import "leaflet/dist/leaflet.css";
+  import {
+    LMap,
+    LTileLayer,
+    LControl,
+    LControlLayers,
+    LTooltip,
+    LMarker,
+    LPolyline,
+  } from "@vue-leaflet/vue-leaflet";
+  import "leaflet.markercluster/dist/MarkerCluster.css";
+  import "leaflet.markercluster/dist/MarkerCluster.Default.css";
+  import "leaflet.markercluster";
+  import "leaflet-draw/dist/leaflet.draw.css";
+  import "leaflet-draw";
+  import MiniMap from "leaflet-minimap";
+
+  import IconNormal from "src/assets/quasar-logo-vertical.svg";
+  import IconNotClassified from "src/assets/quasar-logo-vertical.svg";
+  import IconInformation from "src/assets/quasar-logo-vertical.svg";
+  import IconWarning from "src/assets/quasar-logo-vertical.svg";
+  import IconMajor from "src/assets/quasar-logo-vertical.svg";
+  import IconCritical from "src/assets/quasar-logo-vertical.svg";
+  import IconDisaster from "src/assets/quasar-logo-vertical.svg";
+
+  import { use } from "echarts/core";
+  import { CanvasRenderer, SVGRenderer } from "echarts/renderers";
+  import { LineChart } from "echarts/charts";
+  import {
+    TitleComponent,
+    TooltipComponent,
+    LegendComponent,
+    GridComponent,
+    ToolboxComponent,
+  } from "echarts/components";
+  import VChart, { THEME_KEY } from "vue-echarts";
+
+  use([
+    CanvasRenderer,
+    SVGRenderer,
+    LineChart,
+    GridComponent,
+    TitleComponent,
+    TooltipComponent,
+    ToolboxComponent,
+    LegendComponent,
+  ]);
+  provide(THEME_KEY, "white");
+
+  const route = useRoute();
+  const auth = useAuth();
+
+  const form = ref({
+    id: null,
+    host_a: null,
+    host_b: null,
+    trigger: null,
+    map: null,
+  });
+
+  const links = ref([]);
+  const showLines = ref(false);
+  const polyLines = ref([]);
+  const showDetailModal = ref(false);
+  const showLinkDeleteModal = ref(false);
+  const tab = ref("detail");
+  const splitterModel = ref(15);
+  const zoom = ref(4);
+  const center = ref([-10, -50]);
+  const markers = ref([]);
+  const markerClusterGroup = L.markerClusterGroup();
+
+  const fakeMarkers = ref([
+    {
+      name: "Jordão",
+      label: "Jordão",
+      latLng: [-8.131332, -34.93807],
+      priority: 1,
+      polyLines: [[]],
+    },
+    {
+      name: "Janga",
+      label: "Janga",
+      latLng: [-7.928825, -34.827832],
+      priority: 2,
+      polyLines: [[]],
+    },
+    {
+      name: "Varzea",
+      label: "Varzea",
+      latLng: [-8.048785, -34.957889],
+      priority: 3,
+      polyLines: [[]],
+    },
+  ]);
+  const fakeLine = ref([
+    {
+      id: 1,
+      latLng: [
+        [-8.131432, -34.938023],
+        [-6.404897301121007, -51.41776037156723],
+        [-8.997355569246363, -49.79230232812736],
+        [-6.055205938792393, -48.95760765717175],
+        [-7.996206, -34.838986],
+      ],
+    },
+  ]);
+
+  const maxDialog = ref(false);
+  const alertLoading = ref(false);
+  const alertList = ref([]);
+  const alertColumns = ref([
+    {
+      align: "left",
+      name: "clock",
+      label: "Data",
+      field: "clock",
+      sortable: true,
+      format: (val) => date.formatDate(val, "DD/MM/YYYY HH:mm:ss"),
+    },
+    {
+      align: "left",
+      name: "name",
+      label: "Descrição",
+      field: "name",
+      sortable: true,
+    },
+    {
+      align: "left",
+      name: "severity",
+      label: "Severidade",
+      field: "severity",
+      sortable: true,
+    },
+  ]);
+
+  const graphId = ref(null);
+  const graphData = ref(null);
+  const graphWidth = ref(null);
+  const graphRange = ref(1);
+  const graphLoading = ref(false);
+  const hostGraphList = ref([]);
+  const hostGraphOptions = ref([]);
+  const lastMarker = ref(null);
+  const lastLink = ref(null);
+  const selectedNewLink = ref(null);
+
+  const layer = ref(
+    new L.TileLayer("http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png")
+  );
+
+  const options = ref({
+    position: "bottomright",
+    width: 200,
+    height: 175,
+  });
+
+  const tileProviders = ref([
+    {
+      name: "Claro",
+      visible: false,
+      attribution:
+        '&copy; <a target="_blank" href="http://osm.org/copyright">OpenStreetMap</a> contributors',
+      url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    },
+    {
+      name: "Escuro",
+      visible: false,
+      url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    },
+    {
+      name: "Simplificado",
+      visible: true,
+      url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    },
+  ]);
+
+  function showDetail(marker) {
+    tab.value = "detail";
+    lastMarker.value = marker;
+    showDetailModal.value = true;
+    graphId.value = null;
+    graphRange.value = 1;
+  }
+
+  function loadPoints() {
+    api
+      .get(`/api/map/${route.params.mapID}/group/`, {
+        headers: {
+          Authorization: auth.token ? "Token " + auth.token : null,
+          "X-Geo-Token": route.query.token || null,
+        },
+      })
+      .then((res) => {
+        markers.value = res.data;
+        loadLinks();
+      })
+      .catch((error) => {
+        console.error("Error loading points:", error);
+      });
+  }
+
+  function loadLinks() {
+    api
+      .get(`/api/map/${route.params.mapID}/link/`, {
+        headers: {
+          Authorization: auth.token ? "Token " + auth.token : null,
+          "X-Geo-Token": route.query.token || null,
+        },
+      })
+      .then((res) => {
+        links.value = res.data;
+        linksFilter();
+      })
+      .catch((error) => {
+        console.error("Error loading links:", error);
+      });
+  }
+
+  function updateGraph(size) {
+    graphWidth.value = size.width;
+    loadGraph();
+  }
+
+  const echart = ref();
+  function loadGraph() {
+    if (graphId.value) {
+      echart.value.clear();
+      echart.value.resize();
+      api
+        .get(
+          `/api/map/${route.params.mapID}/graph/${graphId.value}/${graphRange.value}/${graphWidth.value}/`,
+          {
+            headers: {
+              Authorization: auth.token ? "Token " + auth.token : null,
+              "X-Geo-Token": route.query.token || null,
+            },
+          }
+        )
+        .then((res) => {
+          graphData.value = res.data;
+        })
+        .finally(() => {
+          graphLoading.value = false;
+        })
+        .catch((error) => {
+          console.error("Error loading graph:", error);
+        });
+    }
+  }
+
+  function getIcon(marker) {
+    const icons = {
+      0: IconNotClassified,
+      1: IconInformation,
+      2: IconWarning,
+      3: IconMajor,
+      4: IconCritical,
+      5: IconDisaster,
+    };
+
+    return L.icon({
+      iconUrl: icons[marker.priority] || IconNormal,
+      iconSize: [30, 40],
+      iconAnchor: [15, 40],
+    });
+  }
+
+  function refreshGraph(days) {
+    graphRange.value = days;
+    loadGraph();
+  }
+
+  function linksFilter() {
+    const color = ["green"];
+    for (const i in links.value) {
+      const a = markers.value.filter(
+        (marker) => marker.hostId === links.value[i].host_a
+      );
+      const b = markers.value.filter(
+        (marker) => marker.hostId === links.value[i].host_b
+      );
+      if (a.length > 0 && b.length > 0) {
+        polyLines.value.push({
+          id: links.value[i].id,
+          latLong: [
+            [a[0].latitude, a[0].longitude],
+            [b[0].latitude, b[0].longitude],
+          ],
+          color: color[Math.floor(Math.random() * color.length)],
+        });
+      }
+    }
+  }
+
+  function nameByHost(hostId) {
+    return markers.value.filter((host) => host.hostId === hostId);
+  }
+
+  function onTabChange(tabValue) {
+    if (tabValue === "graph") {
+      hostGraphList.value = [];
+      api
+        .get(
+          `/api/map/${route.params.mapID}/host/${lastMarker.value.hostId}/graph/`,
+          {
+            headers: {
+              Authorization: auth.token ? "Token " + auth.token : null,
+              "X-Geo-Token": route.query.token || null,
+            },
+          }
+        )
+        .then((res) => {
+          hostGraphList.value = res.data;
+        })
+        .catch((error) => {
+          console.error("Error loading host graph:", error);
+        });
+    } else if (tabValue === "alert") {
+      alertLoading.value = true;
+      alertList.value = [];
+      api
+        .get(
+          `/api/map/${route.params.mapID}/host/${lastMarker.value.hostId}/alert/`,
+          {
+            headers: {
+              Authorization: auth.token ? "Token " + auth.token : null,
+              "X-Geo-Token": route.query.token || null,
+            },
+          }
+        )
+        .then((res) => {
+          alertList.value = res.data;
+        })
+        .finally(() => {
+          alertLoading.value = false;
+        })
+        .catch((error) => {
+          console.error("Error loading alerts:", error);
+        });
+    }
+  }
+
+  function addLink() {
+    const a = lastMarker.value.hostId;
+    const b = selectedNewLink.value.hostId;
+    polyLines.value = [];
+    form.value.host_a = a < b ? a : b;
+    form.value.host_b = a < b ? b : a;
+    form.value.map = route.params.mapID;
+    form.value.trigger = 666;
+
+    api
+      .post("/api/link/", form, {
+        headers: {
+          Authorization: auth.token ? "Token " + auth.token : null,
+        },
+      })
+      .then(() => {
+        loadPoints();
+      })
+      .catch((error) => {
+        console.error("Error adding link:", error);
+      });
+  }
+
+  function deleteLinkClick(link) {
+    showLinkDeleteModal.value = true;
+    lastLink.value = link;
+  }
+
+  function deleteLink() {
+    api
+      .delete(`/api/link/${lastLink.value.id}/`, {
+        headers: {
+          Authorization: auth.token ? "Token " + auth.token : null,
+          "X-Geo-Token": route.query.token || null,
+        },
+      })
+      .then(() => {
+        polyLines.value = [];
+        loadPoints();
+      })
+      .finally(() => {
+        showLinkDeleteModal.value = false;
+      })
+      .catch((error) => {
+        console.error("Error deleting link:", error);
+      });
+  }
+
+  function filterLatLog(mark) {
+    return [mark.latitude, mark.longitude];
+  }
+
+  function linksByHost() {
+    if (lastMarker.value) {
+      return links.value.filter((link) => {
+        return (
+          lastMarker.value.hostId === link.host_a ||
+          lastMarker.value.hostId === link.host_b
+        );
+      });
+    }
+    return [];
+  }
+
+  function hostGraphFilter(val, update) {
+    update(() => {
+      const needle = val.toLowerCase();
+      hostGraphOptions.value = hostGraphList.value.filter(
+        (v) => v.name.toLowerCase().indexOf(needle) > -1
+      );
+    });
+  }
+
+  const miniMap = ref();
+  const map = ref();
+  function MapReady(mapInstance) {
+    map.value = mapInstance;
+    miniMap.value = new MiniMap(
+      new L.TileLayer(
+        "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+      ),
+      {
+        position: "bottomright",
+        width: 200,
+        height: 175,
+      }
+    ).addTo(map.value);
+    loadingMarkers();
+    loadDraw();
+  }
+
+  function onBaseLayerChange(event) {
+    if (miniMap.value) {
+      if (event?.layer._url !== miniMap.value?._layer._url) {
+        changeMiniMapLayer(event.layer._url);
+      }
+    }
+  }
+
+  function changeMiniMapLayer(newLayerUrl) {
+    if (miniMap.value) {
+      const newLayer = new L.TileLayer(newLayerUrl);
+      miniMap.value.changeLayer(newLayer);
+    } else {
+      console.log("MiniMap não está inicializado.");
+    }
+  }
+
+  function loadingMarkers() {
+    markerClusterGroup.clearLayers();
+    fakeMarkers.value.forEach((ponto) => {
+      const marker = L.marker(ponto.latLng, {
+        icon: getIcon(ponto),
+        ponto,
+      }).bindPopup(ponto.name);
+      markerClusterGroup.addLayer(marker);
+    });
+
+    markerClusterGroup.on("click", function (a) {
+      showDetail(a.layer.options.ponto);
+      console.log(a.layer.options.ponto);
+    });
+
+    map.value.addLayer(markerClusterGroup);
+  }
+
+  const drawControl = ref();
+  const drawingLine = ref(false);
+  const editableLayers = ref();
+  function loadDraw() {
+    editableLayers.value = new L.FeatureGroup();
+    // TODO: Carregar as polyLines que poderam ser editadas
+    loadLines();
+    // map.value.addLayer(editableLayers.value);
+
+    const options = {
+      position: "topright",
+      draw: {
+        polyline: {
+          shapeOptions: {
+            weight: 2,
+          },
+        },
+        circleMarker: false,
+        polygon: false,
+        circle: false,
+        rectangle: false,
+        marker: false,
+      },
+      edit: {
+        featureGroup: editableLayers.value, // Registrando no plugin as polylines editáveis
+        edit: {
+          selectedPathOptions: {
+            maintainColor: true, // Mantém a cor da linha durante a edição
+            opacity: 0.5,
+          },
+        },
+        remove: true,
+      },
+    };
+
+    drawControl.value = new L.Control.Draw(options);
+
+    // Função chamada quando o modo de desenho é finalizada
+    map.value.on(L.Draw.Event.CREATED, function (e) {
+      const type = e.layerType;
+      const layer = e.layer;
+
+      // Remove o circleMarker se ele for criado
+      if (type === "circleMarker") {
+        map.value.removeLayer(e.layer);
+      }
+      if (type === "polyline") {
+        polyline.value = layer.getLatLngs();
+        showRelationLine.value = true;
+      }
+      editableLayers.value.addLayer(layer);
+    });
+
+    // Evento ao finalizar edição
+    map.value.on(L.Draw.Event.EDITED, (e) => {
+      const layers = e.layers;
+      layers.eachLayer((layer) => {
+        // console.log("Linha editada:", layer.getLatLngs()); // Exibe as coordenadas da linha editada
+        // console.log("Linha editada:", layer); // Exibe as coordenadas da linha editada
+
+        const idLine = layer.options.polylineObj.id; //do tipo layer.id
+        const line = fakeLine.value.find((line) => line.id === idLine);
+
+        console.log(line.latLng[0]);
+        console.log(line.latLng[line.latLng.length - 2]);
+        console.log(line.latLng[line.latLng.length - 1]);
+        console.log(layer.getLatLngs());
+        const newLayer = formatadorCoodenadas(layer.getLatLngs());
+        // TODO: pedir confirmação do ponto de destino ou origem
+        if (JSON.stringify(line.latLng[0]) !== JSON.stringify(newLayer[0])) {
+          const pontoAChanged = true;
+          console.log("PONTO A ALTERADO");
+          // showRelationLine.value = true;
+        }
+        if (
+          JSON.stringify(line.latLng[line.latLng.length - 1]) !==
+          JSON.stringify(newLayer[newLayer.length - 1])
+        ) {
+          const pontoBchanged = true;
+          console.log("PONTO B ALTERADO");
+          // showRelationLine.value = true;
+        }
+        line.latLng = newLayer;
+      });
+    });
+    //Inicio de desenho de uma polyline
+    map.value.on("draw:drawstart", (e) => {
+      console.log(`Modo de desenho ativado`);
+      drawingLine.value = true;
+    });
+    // Evento para detectar o término do modo de desenho
+    map.value.on("draw:drawstop", (e) => {
+      console.log(`Modo de desenho desativado`);
+      drawingLine.value = false;
+    });
+  }
+
+  function formatadorCoodenadas(LatLngObject) {
+    const coordenadasFormatadas = LatLngObject.map((latLng) => {
+      // Usa a função toArray() para garantir que obtemos um array simples
+      if (latLng instanceof L.LatLng) {
+        return [latLng.lat, latLng.lng]; // Para o objeto LatLng padrão
+      } else if (Array.isArray(latLng)) {
+        return [parseFloat(latLng[0]), parseFloat(latLng[1])]; // Para o caso de proxy array
+      }
+    });
+    return coordenadasFormatadas;
+  }
+
+  function loadLines() {
+    editableLayers.value.clearLayers();
+    fakeLine.value.forEach((polylineObj) => {
+      const polylineCoords = polylineObj.latLng;
+      const polyline = L.polyline(polylineCoords, {
+        color: "green", //TODO: Usar a cor do ultimo evento
+        weight: 4,
+        polylineObj: polylineObj,
+      });
+      editableLayers.value.addLayer(polyline); // Adiciona ao grupo de itens editáveis
+    });
+  }
+
+  // ocultar e exibir polylines
+  watch(showLines, (newValue, oldValue) => {
+    if (map.value) {
+      if (newValue) {
+        map.value.addLayer(editableLayers.value);
+        console.log(fakeLine.value);
+      } else {
+        map.value.removeLayer(editableLayers.value);
+      }
+    } else {
+      console.warn("Mapa ainda não está pronto!");
+    }
+  });
+
+  // Habilita o modo de edição
+  const editMode = ref(false);
+  watch(editMode, (newValue, oldValue) => {
+    if (map.value) {
+      if (newValue) {
+        map.value.addControl(drawControl.value);
+      } else {
+        map.value.removeControl(drawControl.value);
+      }
+    } else {
+      console.warn("Mapa ainda não está pronto!");
+    }
+  });
+
+  function onMapClick() {
+    if (editMode.value) {
+      if (drawingLine.value) {
+        console.log("Desenhando linha");
+        return;
+      } else {
+        console.log("Abrir formulário ");
+      }
+    }
+  }
+
+  // Relacionarmento da linha
+  const showRelationLine = ref(false);
+  const pointerA = ref();
+  const pointerB = ref();
+  const polyline = ref();
+  function relationLine() {
+    const latLng = formatadorCoodenadas(polyline.value);
+    // const coordenadasFormatadas = polyline.value.map((latLng) => {
+    //   // Usa a função toArray() para garantir que obtemos um array simples
+    //   if (latLng instanceof L.LatLng) {
+    //     return [latLng.lat, latLng.lng]; // Para o objeto LatLng padrão
+    //   } else if (Array.isArray(latLng)) {
+    //     return [parseFloat(latLng[0]), parseFloat(latLng[1])]; // Para o caso de proxy array
+    //   }
+    // });
+
+    // fakeMarkers.value = fakeMarkers.value.map((marker) => {
+    //   if (
+    //     marker.label === pointerA.value.label ||
+    //     marker.label === pointerB.value.label
+    //   ) {
+    //     // TODO: identificar a polyline no array para modifica-la
+    //     marker.polyLines[0].unshift(pointerA.value.latLng);
+    //     marker.polyLines[0].push(...coordenadasFormatadas);
+    //     marker.polyLines[0].push(pointerB.value.latLng);
+    //     return marker;
+    //   }
+    //   return marker;
+    // });
+    // console.log(fakeMarkers.value);
+
+    // TODO: encontrar um modo para atualizar ao inves de criar
+    fakeLine.value.push({
+      id: fakeLine.value.length + 1,
+      latLng: [pointerA.value.latLng, ...latLng, pointerB.value.latLng],
+    });
+    loadLines();
+    showRelationLine.value = false;
+    (pointerA.value = ""), (pointerB.value = "");
+  }
+</script>
+
+<style>
+  /* por alguma razão desativar o circlemarker diretamente no plugin não está funcionando  */
+  a.leaflet-draw-draw-circlemarker {
+    display: none;
+  }
+</style>
